@@ -6,7 +6,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -29,7 +30,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv run playwright install chromium && \
     uv sync --all-extras --compile-bytecode && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    chmod -R a+rx /ms-playwright
 
 # Create a non-root user
 RUN useradd -m -u 1000 user && \
