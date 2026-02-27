@@ -2,6 +2,8 @@ from asyncio import gather
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import Response, JSONResponse
 
 from scrapling.core.shell import Convertor
 from scrapling.engines.toolbelt.custom import Response as _ScraplingResponse
@@ -612,4 +614,14 @@ class ScraplingMCPServer:
             description=self.bulk_stealthy_fetch.__doc__,
             structured_output=True,
         )
+
+        @server.custom_route("/health", methods=["GET"])
+        async def health_check(request: Request) -> Response:
+            return JSONResponse({"status": "healthy"})
+
+        @server.custom_route("/api-docs", methods=["GET"])
+        async def api_docs(request: Request) -> Response:
+            tools = await server.list_tools()
+            return JSONResponse([tool.model_dump() for tool in tools])
+
         server.run(transport="stdio" if not http else "streamable-http")

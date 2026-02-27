@@ -31,11 +31,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Create a non-root user
+RUN useradd -m -u 1000 user && \
+    chown -R user:user /app
+
+# Switch to the non-root user
+USER user
+
 # Expose port for MCP server HTTP transport
-EXPOSE 8000
+EXPOSE 7860
 
 # Set entrypoint to run scrapling
 ENTRYPOINT ["uv", "run", "scrapling"]
 
 # Default command (can be overridden)
-CMD ["--help"]
+CMD ["mcp", "--http", "--port", "7860", "--host", "0.0.0.0"]
