@@ -624,4 +624,30 @@ class ScraplingMCPServer:
             tools = await server.list_tools()
             return JSONResponse([tool.model_dump() for tool in tools])
 
-        server.run(transport="stdio" if not http else "streamable-http")
+        if http:
+            import uvicorn
+
+            # Get the Starlette app from FastMCP
+            mcp_app = server.streamable_http_app()
+
+            try:
+                import gradio as gr
+                from scrapling.ui import create_ui
+
+                demo = create_ui()
+                # Mount Gradio app onto the MCP app
+                # When path="/", Gradio handles requests not handled by the underlying app (or vice versa depending on implementation)
+                # Actually gr.mount_gradio_app returns a NEW FastAPI app that mounts the input app.
+                # But here we want to mount Gradio ON TOP of MCP app or ALONGSIDE.
+                # mount_gradio_app(app, blocks, path) -> app
+                # It adds routes to `app`.
+                # Since mcp_app is Starlette, we might need to wrap it or cast it.
+                # Gradio supports Starlette.
+                app = gr.mount_gradio_app(mcp_app, demo, path="/")
+            except (ImportError, ModuleNotFoundError):
+                app = mcp_app
+                print("Gradio not installed or failed to load, running MCP server only.")
+
+            uvicorn.run(app, host=host, port=port)
+        else:
+            server.run(transport="stdio")
