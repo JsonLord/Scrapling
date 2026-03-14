@@ -89,8 +89,12 @@ shell = [
     "markdownify>=1.2.0",
     "scrapling[fetchers]",
 ]
+ui = [
+    "gradio>=3.0",
+    "scrapling[fetchers]",
+]
 all = [
-    "scrapling[ai,shell]",
+    "scrapling[ai,shell,ui]",
 ]
 
 [project.urls]

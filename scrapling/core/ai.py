@@ -2,6 +2,8 @@ from asyncio import gather
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import Response, JSONResponse
 
 from scrapling.core.shell import Convertor
 from scrapling.engines.toolbelt.custom import Response as _ScraplingResponse
@@ -612,4 +614,40 @@ class ScraplingMCPServer:
             description=self.bulk_stealthy_fetch.__doc__,
             structured_output=True,
         )
-        server.run(transport="stdio" if not http else "streamable-http")
+
+        @server.custom_route("/health", methods=["GET"])
+        async def health_check(request: Request) -> Response:
+            return JSONResponse({"status": "healthy"})
+
+        @server.custom_route("/api-docs", methods=["GET"])
+        async def api_docs(request: Request) -> Response:
+            tools = await server.list_tools()
+            return JSONResponse([tool.model_dump() for tool in tools])
+
+        if http:
+            import uvicorn
+
+            # Get the Starlette app from FastMCP
+            mcp_app = server.streamable_http_app()
+
+            try:
+                import gradio as gr
+                from scrapling.ui import create_ui
+
+                demo = create_ui()
+                # Mount Gradio app onto the MCP app
+                # When path="/", Gradio handles requests not handled by the underlying app (or vice versa depending on implementation)
+                # Actually gr.mount_gradio_app returns a NEW FastAPI app that mounts the input app.
+                # But here we want to mount Gradio ON TOP of MCP app or ALONGSIDE.
+                # mount_gradio_app(app, blocks, path) -> app
+                # It adds routes to `app`.
+                # Since mcp_app is Starlette, we might need to wrap it or cast it.
+                # Gradio supports Starlette.
+                app = gr.mount_gradio_app(mcp_app, demo, path="/")
+            except (ImportError, ModuleNotFoundError):
+                app = mcp_app
+                print("Gradio not installed or failed to load, running MCP server only.")
+
+            uvicorn.run(app, host=host, port=port)
+        else:
+            server.run(transport="stdio")
