@@ -9,15 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=7860 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Install system dependencies
+# Install basic system dependencies (Playwright handles its own deps later)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
-    libgconf-2-4 \
-    libgtk-3-0 \
-    libnss3 \
-    libxss1 \
-    libasound2 \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
