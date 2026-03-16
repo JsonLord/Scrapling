@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.api.routes import router as api_router
 from app.tasks.scheduler import start_scheduler, stop_scheduler
 
@@ -44,8 +46,8 @@ app.add_middleware(
 app.include_router(api_router)
 
 @app.get("/")
-def read_root():
-    return {"status": "ok", "message": "Event Scraper API is running."}
+async def read_root():
+    return FileResponse("app/static/index.html")
 
 @app.get("/health")
 def health_check():
