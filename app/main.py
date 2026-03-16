@@ -28,6 +28,8 @@ app = FastAPI(
     description="API for the long-running event aggregation platform in Berlin.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/api-docs", # Mandatory HF Spaces documentation endpoint
+    redoc_url=None,
 )
 
 # CORS configuration

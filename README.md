@@ -1,3 +1,9 @@
+---
+title: Event Scraper
+sdk: docker
+app_port: 7860
+---
+
 <!-- mcp-name: io.github.D4Vinci/Scrapling -->
 
 <h1 align="center">

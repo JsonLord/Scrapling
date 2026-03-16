@@ -4,10 +4,14 @@ from app.main import app
 
 client = TestClient(app)
 
-def test_read_root():
-    response = client.get("/")
+def test_health():
+    response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "message": "Event Scraper API is running."}
+    assert response.json() == {"status": "healthy"}
+
+def test_api_docs():
+    response = client.get("/api-docs")
+    assert response.status_code == 200
 
 # We mock get_db because these unit tests shouldn't require an actual async db backend to pass
 from unittest.mock import AsyncMock
