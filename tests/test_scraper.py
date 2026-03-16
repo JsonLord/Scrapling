@@ -32,19 +32,17 @@ class MockElement(MockSelector):
 
     def css(self, selector):
         # Extremely simplified mock for css selector
-        if selector == '.event-title::text':
+        if selector == 'h2.title a::text':
             return MockSelector(["Mock Event"])
-        elif selector == '.event-description::text':
+        elif selector == '.subtitle::text':
             return MockSelector(["This is a student discounted event."])
-        elif selector == '.event-location::text':
+        elif selector == '.venue a::text':
             return MockSelector(["Mock Location"])
-        elif selector == '.event-date::text':
+        elif selector == 'time::attr(datetime)':
             return MockSelector(["2024-05-01"])
-        elif selector == '.event-time::text':
+        elif selector == 'time::text':
             return MockSelector(["20:00"])
-        elif selector == '.event-price::text':
-            return MockSelector(["15 EUR"])
-        elif selector == 'a.event-link::attr(href)':
+        elif selector == 'h2.title a::attr(href)':
             return MockSelector(["/mock-event"])
         elif selector == 'h3::text':
             return MockSelector(["Mock Event RG"])
@@ -67,7 +65,7 @@ class MockResponse:
         self.url = url
 
     def css(self, selector):
-        if selector == '.schedule-item' or selector == '.event-card':
+        if selector == '.schedule-item' or selector == '.event-card' or selector == '.schedule-list article':
             return MockSelector([MockElement({})])
         return MockSelector([])
 
