@@ -13,41 +13,53 @@ async def weekly_full_crawl():
     Performs a full crawl for the upcoming week.
     """
     print("Starting weekly full crawl...")
-    # In a real app, you would fetch active target_urls from DB here
-    # For now, we just rely on defaults in the spider
     loop = asyncio.get_running_loop()
-    # Run in an executor if it's blocking, but since Scrapling uses its own async loop,
-    # we might need to adjust how it is invoked in a full async environment.
-    # We will simulate running it here.
     try:
         from app.db.crud import persist_events
 
+        urls = await _get_active_urls()
+
         # run_scraper() is synchronous in Scrapling's high level API
-        items = await loop.run_in_executor(None, run_scraper)
+        items = await loop.run_in_executor(None, run_scraper, urls)
         if items:
             await persist_events(list(items))
 
-        print("Weekly full crawl completed successfully.")
+        print(f"Weekly full crawl completed successfully. Target URLs: {urls or 'defaults'}")
     except Exception as e:
         print(f"Error in weekly full crawl: {e}")
+
+async def _get_active_urls() -> list[str] | None:
+    """Helper to fetch active target URLs from the database."""
+    from app.db.database import async_session_maker
+    from sqlalchemy.future import select
+    from app.db.models import TargetURL
+
+    async with async_session_maker() as session:
+        url_stmt = select(TargetURL.url).where(TargetURL.active == True)
+        url_result = await session.execute(url_stmt)
+        active_urls = url_result.scalars().all()
+        if active_urls:
+            return list(active_urls)
+    return None
 
 async def manual_crawl(target_url: str = None):
     """
     Task triggered manually via the API.
     Optionally scopes the crawl to a specific URL.
     """
-    print(f"Starting manual crawl. Target: {target_url if target_url else 'All'}")
+    print(f"Starting manual crawl. Target: {target_url if target_url else 'All active DB targets'}")
     loop = asyncio.get_running_loop()
     try:
         from app.db.crud import persist_events
 
-        # pass the target_url as a list if provided
-        urls = [target_url] if target_url else None
+        # pass the target_url as a list if provided, else fetch active URLs from DB
+        urls = [target_url] if target_url else await _get_active_urls()
+
         items = await loop.run_in_executor(None, run_scraper, urls)
         if items:
             await persist_events(list(items))
 
-        print("Manual crawl completed successfully.")
+        print(f"Manual crawl completed successfully. Target URLs: {urls or 'defaults'}")
     except Exception as e:
         print(f"Error in manual crawl: {e}")
 
@@ -61,11 +73,12 @@ async def weekly_weekend_crawl():
     try:
         from app.db.crud import persist_events
 
-        items = await loop.run_in_executor(None, run_scraper)
+        urls = await _get_active_urls()
+        items = await loop.run_in_executor(None, run_scraper, urls)
         if items:
             await persist_events(list(items))
 
-        print("Weekend supplementary crawl completed successfully.")
+        print(f"Weekend supplementary crawl completed successfully. Target URLs: {urls or 'defaults'}")
     except Exception as e:
         print(f"Error in weekend crawl: {e}")
 

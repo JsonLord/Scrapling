@@ -21,9 +21,25 @@ class BerlinEventsSpider(Spider):
     concurrent_requests = 5
 
     def configure_sessions(self, manager):
-        # We will use the StealthySession to handle websites with strong anti-bot (e.g., Cloudflare)
-        # We run it headless for production.
-        manager.add("stealth", AsyncStealthySession(headless=True, solve_cloudflare=True))
+        # Determine proxy configuration if available in the environment
+        proxy = None
+        if settings.proxy_url:
+            proxy = settings.proxy_url
+            if settings.proxy_auth:
+                proxy = {
+                    "server": settings.proxy_url,
+                    "username": settings.proxy_auth.split(":")[0],
+                    "password": settings.proxy_auth.split(":")[1] if ":" in settings.proxy_auth else ""
+                }
+
+        # We use the AsyncStealthySession to handle websites with strong anti-bot (e.g., Cloudflare)
+        # We enforce network_idle to wait for JavaScript to finish rendering dynamic content.
+        manager.add("stealth", AsyncStealthySession(
+            headless=True,
+            solve_cloudflare=True,
+            network_idle=True,  # Wait for API calls to settle
+            proxy=proxy
+        ))
 
     async def parse(self, response: Response):
         """
@@ -100,22 +116,23 @@ class BerlinEventsSpider(Spider):
         """
         Parses events from berlin-buehnen.de/schedule
         """
-        # Berlin buehnen structure
-        events = response.css('.schedule-list article')
-        for event in events:
-            # Extract basic data points
-            event_name = event.css('h2.title a::text').get()
-            info = event.css('.subtitle::text').get()
-            location = event.css('.venue a::text').get()
-            date_str = event.css('time::attr(datetime)').get()
-            time_str = event.css('time::text').get()
-            ticket_prices = None
-            link = event.css('h2.title a::attr(href)').get()
+        # Adjusting the Berlin Buehnen selector to account for delayed lazy-loading and varying DOM
+        # Sometimes events are wrapped in a slightly different generic class if not completely hydrated
+        events = response.css('article.event-list-item')
+        if not events:
+            # Fallback to older or alternative structure
+            events = response.css('.schedule-list article')
 
-            # Semantic parsing/heuristics: check if student discount is likely based on text
-            # E.g., 'ermäßigt', 'student', 'studentenrabatt'
+        for event in events:
+            event_name = event.css('h2 a::text').get() or event.css('.title::text').get()
+            info = event.css('.subtitle::text').get() or event.css('p.description::text').get()
+            location = event.css('.venue::text').get() or event.css('.location a::text').get()
+            date_str = event.css('time::attr(datetime)').get() or event.css('.date::text').get()
+            time_str = event.css('time::text').get() or event.css('.time::text').get()
+            link = event.css('h2 a::attr(href)').get() or event.css('a.event-link::attr(href)').get()
+
             student_discount = False
-            if info and any(word in info.lower() for word in ['student', 'ermäßigt', 'discount']):
+            if info and any(word in info.lower() for word in ['student', 'ermäßigt', 'discount', 'schüler']):
                 student_discount = True
 
             if event_name and link:
@@ -123,9 +140,9 @@ class BerlinEventsSpider(Spider):
                     "name": event_name.strip(),
                     "info": info.strip() if info else None,
                     "location": location.strip() if location else settings.default_location,
-                    "date": date_str.strip() if date_str else None,  # Needs datetime parsing
+                    "date": date_str.strip() if date_str else None,
                     "time": time_str.strip() if time_str else None,
-                    "ticket_prices": ticket_prices.strip() if ticket_prices else None,
+                    "ticket_prices": "Free" if 'free' in str(info).lower() else None,
                     "student_discounts_eligible": student_discount,
                     "link": response.urljoin(link) if link.startswith('/') else link,
                 }
