@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     version: str = "1.0.0"
 
     # Database Configuration
-    database_url: str = Field(default="sqlite:///./events.db", description="Database URI")
+    database_url: str = Field(default="sqlite:////app/events.db", description="Database URI")
 
     # Scheduler Configuration
     schedule_timezone: str = Field(default="Europe/Berlin", description="Timezone for the scheduler")

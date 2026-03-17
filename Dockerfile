@@ -27,11 +27,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p /ms-playwright && chown -R user:user /ms-playwright
 RUN pip install --no-cache-dir patchright playwright
 RUN patchright install-deps chromium
-USER user
 RUN patchright install chromium
 
 # Copy application code
 COPY --chown=user:user . /app/
+RUN chown -R user:user /app && chmod -R 777 /app
+
+# Set user context
+USER user
 
 # Expose HF space port
 EXPOSE 7860
