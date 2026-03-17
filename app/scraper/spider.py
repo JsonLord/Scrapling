@@ -46,20 +46,68 @@ class BerlinEventsSpider(Spider):
         Main parser that distributes parsing based on URL.
         """
         # Distribute logic based on domain
+        # We attempt direct parsing first if the response is valid (not a CAPTCHA/Cloudflare block page)
+        # Often Cloudflare returns ~30kb HTML payload. Let's assume if it's < 50kb and we find 0 events, it's blocked.
+        events_found = 0
+
         if "berlin-buehnen.de" in response.url:
             async for item in self.parse_berlin_buehnen(response):
+                events_found += 1
                 yield item
         elif "rausgegangen.de" in response.url:
             async for item in self.parse_rausgegangen(response):
+                events_found += 1
                 yield item
         elif "quotes.toscrape.com" in response.url:
-            # Dummy logic to verify database pipeline works locally since CloudFlare blocks others in Sandbox
             async for item in self.parse_quotes(response):
+                events_found += 1
                 yield item
-        else:
-            # Fallback logic utilizing Jina Reader API
-            async for item in self.parse_with_jina(response):
+
+        # If direct headless Chromium blocked (events_found = 0), route it through the Public Web Proxy Tunnel
+        if events_found == 0 and "quotes.toscrape" not in response.url:
+            print(f"Direct parsing failed for {response.url}. Activating Proxy Tunnel fallback...")
+            async for item in self.parse_with_fallback(response):
                 yield item
+
+    async def parse_with_fallback(self, response: Response):
+        """
+        Uses Proxy Tunneling (AllOrigins) as a final attempt to fetch HTML bypassing direct blocks,
+        then optionally falls back to the Jina Reader LLM extraction.
+        """
+        import httpx
+        from scrapling.parser import Selector
+
+        # 1. Proxy Tunneling (Inspired by reference repo)
+        # Bypasses local network blocks/Cloudflare intercepts by routing the HTTP request through a public proxy relay.
+        tunnel_url = f"https://api.allorigins.win/raw?url={response.url}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                print(f"Attempting Proxy Tunnel fetch for: {response.url}")
+                tunnel_res = await client.get(tunnel_url)
+
+                if tunnel_res.status_code == 200 and len(tunnel_res.text) > 1000:
+                    # Successfully tunneled the HTML. Create a new Selector.
+                    tunneled_page = Selector(tunnel_res.text)
+
+                    # Attempt to run our specific domain parsers on the tunneled HTML
+                    if "berlin-buehnen.de" in response.url:
+                        # Create a mock Response object for our parser method
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda path: f"https://www.berlin-buehnen.de{path}"})()
+                        async for item in self.parse_berlin_buehnen(mock_resp):
+                            yield item
+                        return
+                    elif "rausgegangen.de" in response.url:
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda path: f"https://rausgegangen.de{path}"})()
+                        async for item in self.parse_rausgegangen(mock_resp):
+                            yield item
+                        return
+        except Exception as e:
+            print(f"Proxy tunnel failed: {e}")
+
+        # 2. If proxy tunnel fails or didn't yield results, fallback to Jina LLM Reader
+        async for item in self.parse_with_jina(response):
+            yield item
 
     async def parse_with_jina(self, response: Response):
         """
