@@ -58,6 +58,22 @@ class BerlinEventsSpider(Spider):
             async for item in self.parse_rausgegangen(response):
                 events_found += 1
                 yield item
+        elif "berliner-ensemble.de" in response.url:
+            async for item in self.parse_berliner_ensemble(response):
+                events_found += 1
+                yield item
+        elif "oper-in-berlin.de" in response.url:
+            async for item in self.parse_oper_berlin(response):
+                events_found += 1
+                yield item
+        elif "improfabrik.de" in response.url:
+            async for item in self.parse_improfabrik(response):
+                events_found += 1
+                yield item
+        elif "eventbrite.de" in response.url:
+            async for item in self.parse_eventbrite(response):
+                events_found += 1
+                yield item
         elif "quotes.toscrape.com" in response.url:
             async for item in self.parse_quotes(response):
                 events_found += 1
@@ -93,13 +109,33 @@ class BerlinEventsSpider(Spider):
                     # Attempt to run our specific domain parsers on the tunneled HTML
                     if "berlin-buehnen.de" in response.url:
                         # Create a mock Response object for our parser method
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda path: f"https://www.berlin-buehnen.de{path}"})()
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berlin-buehnen.de{path}"})()
                         async for item in self.parse_berlin_buehnen(mock_resp):
                             yield item
                         return
                     elif "rausgegangen.de" in response.url:
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda path: f"https://rausgegangen.de{path}"})()
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://rausgegangen.de{path}"})()
                         async for item in self.parse_rausgegangen(mock_resp):
+                            yield item
+                        return
+                    elif "berliner-ensemble.de" in response.url:
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berliner-ensemble.de{path}"})()
+                        async for item in self.parse_berliner_ensemble(mock_resp):
+                            yield item
+                        return
+                    elif "oper-in-berlin.de" in response.url:
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.oper-in-berlin.de{path}"})()
+                        async for item in self.parse_oper_berlin(mock_resp):
+                            yield item
+                        return
+                    elif "improfabrik.de" in response.url:
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://improfabrik.de{path}"})()
+                        async for item in self.parse_improfabrik(mock_resp):
+                            yield item
+                        return
+                    elif "eventbrite.de" in response.url:
+                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.eventbrite.de{path}"})()
+                        async for item in self.parse_eventbrite(mock_resp):
                             yield item
                         return
         except Exception as e:
@@ -121,6 +157,7 @@ class BerlinEventsSpider(Spider):
         api_key = settings.jina_api_key
         if not api_key:
             # If no API key is provided, we can't do the fallback
+            print(f"Skipping Jina Reader fallback for {response.url}: JINA_API_KEY environment variable not set.")
             return
 
         jina_url = "https://r.jina.ai/" + response.url
@@ -195,6 +232,53 @@ class BerlinEventsSpider(Spider):
                     "link": response.urljoin(link) if link.startswith('/') else link,
                 }
 
+    async def parse_improfabrik(self, response: Response):
+        """
+        Parses events from improfabrik.de
+        """
+        events = response.css('.mec-event-article') or response.css('article.mec-event-item')
+        for event in events:
+            event_name = event.css('.mec-event-title a::text').get() or event.css('h4 a::text').get()
+            date_str = event.css('.mec-event-date::text').get() or event.css('.mec-start-date-label::text').get()
+            time_str = event.css('.mec-event-time::text').get() or event.css('.mec-time-details::text').get()
+            link = event.css('.mec-event-title a::attr(href)').get() or event.css('h4 a::attr(href)').get()
+
+            if event_name and link:
+                yield {
+                    "name": event_name.strip(),
+                    "info": event.css('.mec-event-description::text').get(),
+                    "location": event.css('.mec-event-location::text').get() or "Improfabrik Berlin",
+                    "date": date_str.strip() if date_str else None,
+                    "time": time_str.strip() if time_str else None,
+                    "ticket_prices": None,
+                    "student_discounts_eligible": True,
+                    "link": response.urljoin(link) if link.startswith('/') else link,
+                }
+
+    async def parse_eventbrite(self, response: Response):
+        """
+        Parses events from eventbrite.de
+        """
+        events = response.css('.discover-search-desktop-card') or response.css('div[data-testid="search-results-list"] article')
+        for event in events:
+            event_name = event.css('h3::text').get() or event.css('h2[data-testid="event-card-title"]::text').get()
+            location = event.css('.event-card__subtitle::text').get() or event.css('[data-testid="event-card-location"]::text').get()
+            date_str = event.css('.event-card__date::text').get() or event.css('p.Typography_body-md-bold__487rx::text').get()
+            ticket_prices = event.css('[data-testid="event-card-price"]::text').get()
+            link = event.css('a.event-card-link::attr(href)').get() or event.css('a::attr(href)').get()
+
+            if event_name and link:
+                yield {
+                    "name": event_name.strip(),
+                    "info": None,
+                    "location": location.strip() if location else "Berlin",
+                    "date": date_str.strip() if date_str else None,
+                    "time": None,
+                    "ticket_prices": ticket_prices.strip() if ticket_prices else None,
+                    "student_discounts_eligible": False,
+                    "link": response.urljoin(link) if link.startswith('/') else link,
+                }
+
     async def parse_quotes(self, response: Response):
         """
         Fallback simple parser mapping Quotes to the Event schema to verify background persistence
@@ -218,25 +302,72 @@ class BerlinEventsSpider(Spider):
         """
         Parses events from rausgegangen.de
         """
-        events = response.css('.event-card') # conceptual selector
+        events = response.css('.EventCard_eventCard__2L1N_')
+        if not events:
+            events = response.css('a[class*="EventCard"]')
+
         for event in events:
-            event_name = event.css('h3::text').get()
-            info = event.css('.description::text').get()
-            location = event.css('.venue::text').get()
-            date_str = event.css('.date::text').get()
-            time_str = event.css('.time::text').get()
-            ticket_prices = event.css('.price::text').get()
-            link = event.css('a::attr(href)').get()
+            event_name = event.css('h3::text').get() or event.css('.EventCard_title__1Hl0V::text').get()
+            location = event.css('.EventCard_location__2G_7p::text').get() or event.css('[class*="location"]::text').get()
+            date_str = event.css('.EventCard_date__1vP_l::text').get() or event.css('[class*="date"]::text').get()
+            link = event.css('::attr(href)').get()
+            if not link and event.name == 'a':
+                link = event.attrib.get('href')
 
             if event_name and link:
                 yield {
                     "name": event_name.strip(),
-                    "info": info.strip() if info else None,
-                    "location": location.strip() if location else settings.default_location,
+                    "info": None,
+                    "location": location.strip() if location else "Berlin",
+                    "date": date_str.strip() if date_str else None,
+                    "time": None,
+                    "ticket_prices": None,
+                    "student_discounts_eligible": False,
+                    "link": response.urljoin(link) if link.startswith('/') else link,
+                }
+
+    async def parse_berliner_ensemble(self, response: Response):
+        """
+        Parses events from berliner-ensemble.de/spielplan
+        """
+        events = response.css('.view-content .views-row')
+        for event in events:
+            event_name = event.css('.title a::text').get() or event.css('.field-name-title a::text').get()
+            date_str = event.css('.date-display-single::attr(content)').get()
+            time_str = event.css('.date-display-single::text').get()
+            link = event.css('.title a::attr(href)').get()
+
+            if event_name and link:
+                yield {
+                    "name": event_name.strip(),
+                    "info": event.css('.field-name-field-subtitle::text').get(),
+                    "location": "Berliner Ensemble",
                     "date": date_str.strip() if date_str else None,
                     "time": time_str.strip() if time_str else None,
-                    "ticket_prices": ticket_prices.strip() if ticket_prices else None,
-                    "student_discounts_eligible": False,
+                    "ticket_prices": None,
+                    "student_discounts_eligible": True,
+                    "link": response.urljoin(link) if link.startswith('/') else link,
+                }
+
+    async def parse_oper_berlin(self, response: Response):
+        """
+        Parses events from oper-in-berlin.de
+        """
+        events = response.css('.event-item') or response.css('.spielplan-item')
+        for event in events:
+            event_name = event.css('h2 a::text').get() or event.css('.title::text').get()
+            date_str = event.css('time::attr(datetime)').get()
+            link = event.css('h2 a::attr(href)').get() or event.css('a.link::attr(href)').get()
+
+            if event_name and link:
+                yield {
+                    "name": event_name.strip(),
+                    "info": event.css('.subtitle::text').get(),
+                    "location": event.css('.location::text').get() or "Oper in Berlin",
+                    "date": date_str.strip() if date_str else None,
+                    "time": event.css('.time::text').get(),
+                    "ticket_prices": None,
+                    "student_discounts_eligible": True,
                     "link": response.urljoin(link) if link.startswith('/') else link,
                 }
 

@@ -44,10 +44,16 @@ class MockElement(MockSelector):
             return MockSelector(["20:00"])
         elif selector == 'h2.title a::attr(href)' or selector == 'h2 a::attr(href)' or selector == 'a.event-link::attr(href)':
             return MockSelector(["/mock-event"])
-        elif selector == 'h3::text':
+        elif selector == 'h3::text' or selector == '.EventCard_title__1Hl0V::text':
             return MockSelector(["Mock Event RG"])
         elif selector == '.description::text':
             return MockSelector(["RG description"])
+        elif selector == '.EventCard_location__2G_7p::text' or selector == '[class*="location"]::text':
+            return MockSelector(["Mock Location"])
+        elif selector == '.EventCard_date__1vP_l::text' or selector == '[class*="date"]::text':
+            return MockSelector(["2024-05-02"])
+        elif selector == '::attr(href)':
+            return MockSelector(["/rg-mock-event"])
         elif selector == '.venue::text':
             # This selector is now shared by the fallback mechanism in parse_berlin_buehnen and parse_rausgegangen
             # For test isolation without deep DOM mocking, we handle it conditionally or accept the override.
@@ -68,7 +74,7 @@ class MockResponse:
         self.url = url
 
     def css(self, selector):
-        if selector == '.schedule-item' or selector == '.event-card' or selector == '.schedule-list article' or selector == 'article.event-list-item':
+        if selector == '.schedule-item' or selector == '.event-card' or selector == '.schedule-list article' or selector == 'article.event-list-item' or selector == '.EventCard_eventCard__2L1N_':
             return MockSelector([MockElement({})])
         return MockSelector([])
 
