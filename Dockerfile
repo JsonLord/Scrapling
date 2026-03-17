@@ -10,6 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install basic system dependencies (Playwright handles its own deps later)
+# Force cache invalidation: v2
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -24,8 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright dependencies system-wide, and install browsers to the shared location
 RUN mkdir -p /ms-playwright && chown -R user:user /ms-playwright
-RUN pip install --no-cache-dir patchright
-RUN playwright install-deps chromium
+RUN pip install --no-cache-dir patchright playwright
+RUN patchright install-deps chromium
 USER user
 RUN patchright install chromium
 
