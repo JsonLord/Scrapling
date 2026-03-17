@@ -9,3 +9,4 @@ apscheduler
 scrapling
 pytest
 pytest-asyncio
+pyyaml
