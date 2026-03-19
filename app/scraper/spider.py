@@ -154,6 +154,12 @@ class BerlinEventsSpider(Spider):
                         async for item in self.parse_eventbrite(tunneled_resp):
                             yield item
                         return
+                else:
+                    print(f"[DEBUG - Gradio Hub] Failed: Payload was under 1000 bytes ({len(html_text)}).")
+                    print(f"[DEBUG - Gradio Hub RAW]: {result}")
+            else:
+                print(f"[DEBUG - Gradio Hub] Failed: Invalid status or missing content.")
+                print(f"[DEBUG - Gradio Hub RAW]: {result}")
 
         except Exception as e:
             import traceback
