@@ -50,6 +50,14 @@ class BerlinEventsSpider(Spider):
         # Often Cloudflare returns ~30kb HTML payload. Let's assume if it's < 50kb and we find 0 events, it's blocked.
         events_found = 0
 
+        # Add basic debugging to track the DOM payload
+        text_content = ""
+        try:
+            text_content = response.text if hasattr(response, 'text') else str(response.body)
+            print(f"[DEBUG - Direct] {response.url} returned HTML length: {len(text_content)} bytes")
+        except Exception:
+            print(f"[DEBUG - Direct] {response.url} failed to read text/body.")
+
         if "berlin-buehnen.de" in response.url:
             async for item in self.parse_berlin_buehnen(response):
                 events_found += 1
@@ -79,9 +87,11 @@ class BerlinEventsSpider(Spider):
                 events_found += 1
                 yield item
 
+        print(f"[DEBUG - Direct] Finished CSS parsing for {response.url} - Events found: {events_found}")
+
         # If direct headless Chromium blocked (events_found = 0), route it through the Public Web Proxy Tunnel
         if events_found == 0 and "quotes.toscrape" not in response.url:
-            print(f"Direct parsing failed for {response.url}. Activating Proxy Tunnel fallback...")
+            print(f"[DEBUG - Fallback] Direct parsing failed for {response.url}. Activating Proxy Tunnel fallback...")
             async for item in self.parse_with_fallback(response):
                 yield item
 
@@ -99,43 +109,44 @@ class BerlinEventsSpider(Spider):
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                print(f"Attempting Proxy Tunnel fetch for: {response.url}")
+                print(f"[DEBUG - Tunnel] Fetching: {tunnel_url}")
                 tunnel_res = await client.get(tunnel_url)
 
                 if tunnel_res.status_code == 200 and len(tunnel_res.text) > 1000:
+                    print(f"[DEBUG - Tunnel] Success: Fetched {len(tunnel_res.text)} bytes for {response.url}")
                     # Successfully tunneled the HTML. Create a new Selector.
                     tunneled_page = Selector(tunnel_res.text)
 
                     # Attempt to run our specific domain parsers on the tunneled HTML
                     if "berlin-buehnen.de" in response.url:
-                        # Create a mock Response object for our parser method
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berlin-buehnen.de{path}"})()
-                        async for item in self.parse_berlin_buehnen(mock_resp):
+                        # Create a Tunneled Response object to mimic Scrapling's Response API for the parsers
+                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berlin-buehnen.de{path}"})()
+                        async for item in self.parse_berlin_buehnen(tunneled_resp):
                             yield item
                         return
                     elif "rausgegangen.de" in response.url:
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://rausgegangen.de{path}"})()
-                        async for item in self.parse_rausgegangen(mock_resp):
+                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://rausgegangen.de{path}"})()
+                        async for item in self.parse_rausgegangen(tunneled_resp):
                             yield item
                         return
                     elif "berliner-ensemble.de" in response.url:
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berliner-ensemble.de{path}"})()
-                        async for item in self.parse_berliner_ensemble(mock_resp):
+                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berliner-ensemble.de{path}"})()
+                        async for item in self.parse_berliner_ensemble(tunneled_resp):
                             yield item
                         return
                     elif "oper-in-berlin.de" in response.url:
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.oper-in-berlin.de{path}"})()
-                        async for item in self.parse_oper_berlin(mock_resp):
+                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.oper-in-berlin.de{path}"})()
+                        async for item in self.parse_oper_berlin(tunneled_resp):
                             yield item
                         return
                     elif "improfabrik.de" in response.url:
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://improfabrik.de{path}"})()
-                        async for item in self.parse_improfabrik(mock_resp):
+                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://improfabrik.de{path}"})()
+                        async for item in self.parse_improfabrik(tunneled_resp):
                             yield item
                         return
                     elif "eventbrite.de" in response.url:
-                        mock_resp = type('MockResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.eventbrite.de{path}"})()
-                        async for item in self.parse_eventbrite(mock_resp):
+                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.eventbrite.de{path}"})()
+                        async for item in self.parse_eventbrite(tunneled_resp):
                             yield item
                         return
         except Exception as e:
