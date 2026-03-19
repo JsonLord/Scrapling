@@ -8,7 +8,6 @@ from app.core.config import settings
 class BerlinEventsSpider(Spider):
     name = "berlin_events"
     start_urls = [
-        "http://quotes.toscrape.com/", # Simple static site for testing scraper logic and DB integration locally
         "https://www.berlin-buehnen.de/en/schedule",
         "https://rausgegangen.de/en/berlin/",
         "https://www.berliner-ensemble.de/spielplan",
@@ -82,44 +81,50 @@ class BerlinEventsSpider(Spider):
             async for item in self.parse_eventbrite(response):
                 events_found += 1
                 yield item
-        elif "quotes.toscrape.com" in response.url:
-            async for item in self.parse_quotes(response):
-                events_found += 1
-                yield item
 
         print(f"[DEBUG - Direct] Finished CSS parsing for {response.url} - Events found: {events_found}")
 
-        # If direct headless Chromium blocked (events_found = 0), route it through the Public Web Proxy Tunnel
-        if events_found == 0 and "quotes.toscrape" not in response.url:
-            print(f"[DEBUG - Fallback] Direct parsing failed for {response.url}. Activating Proxy Tunnel fallback...")
-            async for item in self.parse_with_fallback(response):
+        # If direct headless Chromium blocked (events_found = 0), route it through the External Gradio API Hub
+        if events_found == 0:
+            print(f"[DEBUG - Fallback] Direct parsing failed for {response.url}. Activating Gradio API Hub fallback...")
+            async for item in self.parse_with_gradio_hub(response):
                 yield item
 
-    async def parse_with_fallback(self, response: Response):
+    async def parse_with_gradio_hub(self, response: Response):
         """
-        Uses Proxy Tunneling (AllOrigins) as a final attempt to fetch HTML bypassing direct blocks,
-        then optionally falls back to the Jina Reader LLM extraction.
+        Uses the robust auxteam-scraper-hub Gradio API to reliably fetch content and sub-links bypassing direct blocks,
+        then defaults to Jina if structured data is entirely broken.
         """
-        import httpx
+        from gradio_client import Client
+        import asyncio
         from scrapling.parser import Selector
 
-        # 1. Proxy Tunneling (Inspired by reference repo)
-        # Bypasses local network blocks/Cloudflare intercepts by routing the HTTP request through a public proxy relay.
-        tunnel_url = f"https://api.allorigins.win/raw?url={response.url}"
+        client = Client("https://auxteam-scraper-hub.hf.space")
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                print(f"[DEBUG - Tunnel] Fetching: {tunnel_url}")
-                tunnel_res = await client.get(tunnel_url)
+            print(f"[DEBUG - Gradio Hub] Fetching HTML for {response.url}...")
 
-                if tunnel_res.status_code == 200 and len(tunnel_res.text) > 1000:
-                    print(f"[DEBUG - Tunnel] Success: Fetched {len(tunnel_res.text)} bytes for {response.url}")
-                    # Successfully tunneled the HTML. Create a new Selector.
-                    tunneled_page = Selector(tunnel_res.text)
+            # Use asyncio to offload the synchronous Gradio predict method
+            loop = asyncio.get_running_loop()
 
-                    # Attempt to run our specific domain parsers on the tunneled HTML
+            # Since Gradio predict defaults to Markdown if selector is empty, we pass 'html' as selector to get full HTML
+            # to reuse our precise CSS parsers.
+            result = await loop.run_in_executor(None, lambda: client.predict(
+                url=response.url,
+                selector="html",
+                headless=True,
+                api_name="/stealthy_fetch_wrapper",
+            ))
+
+            if isinstance(result, dict) and result.get("status") == 200 and result.get("content"):
+                # Join the contents (in case multiple HTML tags returned)
+                html_text = "".join(result["content"])
+
+                if len(html_text) > 1000:
+                    print(f"[DEBUG - Gradio Hub] Success: Fetched {len(html_text)} bytes for {response.url}")
+                    tunneled_page = Selector(html_text)
+
                     if "berlin-buehnen.de" in response.url:
-                        # Create a Tunneled Response object to mimic Scrapling's Response API for the parsers
                         tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berlin-buehnen.de{path}"})()
                         async for item in self.parse_berlin_buehnen(tunneled_resp):
                             yield item
@@ -149,10 +154,11 @@ class BerlinEventsSpider(Spider):
                         async for item in self.parse_eventbrite(tunneled_resp):
                             yield item
                         return
-        except Exception as e:
-            print(f"Proxy tunnel failed: {e}")
 
-        # 2. If proxy tunnel fails or didn't yield results, fallback to Jina LLM Reader
+        except Exception as e:
+            print(f"Gradio API Hub fetch failed: {e}")
+
+        # Fallback to Jina LLM Reader
         async for item in self.parse_with_jina(response):
             yield item
 
@@ -289,25 +295,6 @@ class BerlinEventsSpider(Spider):
                     "student_discounts_eligible": False,
                     "link": response.urljoin(link) if link.startswith('/') else link,
                 }
-
-    async def parse_quotes(self, response: Response):
-        """
-        Fallback simple parser mapping Quotes to the Event schema to verify background persistence
-        in constrained environments.
-        """
-        for idx, quote in enumerate(response.css('.quote')):
-            text = quote.css('.text::text').get()
-            author = quote.css('.author::text').get()
-            yield {
-                "name": f"Event Quote by {author}",
-                "info": text,
-                "location": "Berlin",
-                "date": None,
-                "time": None,
-                "ticket_prices": "Free",
-                "student_discounts_eligible": True,
-                "link": f"http://quotes.toscrape.com/quote/{idx}",
-            }
 
     async def parse_rausgegangen(self, response: Response):
         """

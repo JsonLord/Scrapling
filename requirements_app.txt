@@ -12,3 +12,4 @@ pytest-asyncio
 pyyaml
 loguru
 curl_cffi
+gradio_client
