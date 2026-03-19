@@ -156,9 +156,12 @@ class BerlinEventsSpider(Spider):
                         return
 
         except Exception as e:
-            print(f"Gradio API Hub fetch failed: {e}")
+            import traceback
+            print(f"[DEBUG - Gradio Hub] API fetch failed for {response.url}: {e}")
+            traceback.print_exc()
 
         # Fallback to Jina LLM Reader
+        print(f"[DEBUG - Fallback] Gradio parsing failed for {response.url}. Activating Jina LLM fallback...")
         async for item in self.parse_with_jina(response):
             yield item
 
@@ -212,7 +215,9 @@ class BerlinEventsSpider(Spider):
                         except json.JSONDecodeError:
                             print(f"Failed to decode Jina response for {response.url}")
         except Exception as e:
-            print(f"Jina fallback request failed: {e}")
+            import traceback
+            print(f"[DEBUG - Jina] Fallback request failed: {e}")
+            traceback.print_exc()
 
     async def parse_berlin_buehnen(self, response: Response):
         """
