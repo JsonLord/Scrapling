@@ -1,7 +1,9 @@
 import asyncio
 from typing import Dict, Any, List
+from datetime import datetime
+import re
 from scrapling.spiders import Spider, Response, Request
-from scrapling.fetchers import AsyncStealthySession
+from scrapling.fetchers import AsyncStealthySession, FetcherSession, ProxyRotator
 from app.db.models import Event
 from app.core.config import settings
 
@@ -17,46 +19,101 @@ class BerlinEventsSpider(Spider):
     ]
 
     # Scrapling Spider configuration
-    concurrent_requests = 5
+    concurrent_requests = 4
 
     def configure_sessions(self, manager):
-        # Determine proxy configuration if available in the environment
-        proxy = None
+        # Configure advanced proxy rotator if available
+        rotator = None
         if settings.proxy_url:
-            proxy = settings.proxy_url
+            proxy_config = settings.proxy_url
             if settings.proxy_auth:
-                proxy = {
+                proxy_config = {
                     "server": settings.proxy_url,
                     "username": settings.proxy_auth.split(":")[0],
                     "password": settings.proxy_auth.split(":")[1] if ":" in settings.proxy_auth else ""
                 }
+            rotator = ProxyRotator([proxy_config])
 
-        # We use the AsyncStealthySession to handle websites with strong anti-bot (e.g., Cloudflare)
-        # We enforce network_idle to wait for JavaScript to finish rendering dynamic content.
+        # 1. Stealthy Session (Browser automation for heavy anti-bot & SPAs)
+        # We enforce network_idle=True to wait for JavaScript to finish rendering dynamic content like React elements.
         manager.add("stealth", AsyncStealthySession(
             headless=True,
             solve_cloudflare=True,
-            network_idle=True,  # Wait for API calls to settle
-            proxy=proxy
+            network_idle=True,
+            proxy_rotator=rotator if rotator else None,
+            block_webrtc=True,
+            hide_canvas=True
+        ), lazy=True)
+
+        # 2. Fast HTTP Session (Lightweight impersonated HTTP requests for static/less protected sites)
+        manager.add("fast", FetcherSession(
+            impersonate="chrome",
+            proxy_rotator=rotator if rotator else None
         ))
+
+    async def is_blocked(self, response: Response) -> bool:
+        """
+        Custom block detection overriding the default Scrapling logic to catch Cloudflare challenges
+        or generic IP bans before parsing.
+        """
+        if response.status in {403, 429, 503}:
+            return True
+
+        body_text = ""
+        try:
+            body_text = response.text.lower() if hasattr(response, 'text') else response.body.decode("utf-8", errors="ignore").lower()
+        except:
+            pass
+
+        if "just a moment" in body_text or "cloudflare" in body_text or "access denied" in body_text:
+            return True
+        return False
+
+    async def retry_blocked_request(self, request: Request, response: Response) -> Request:
+        """
+        If a fast HTTP request gets blocked, bump it up to the stealth browser session!
+        """
+        self.logger.warning(f"[ANTI-BOT] Blocked on {request.url} with session {request.sid}. Retrying with stealth browser...")
+        request.sid = "stealth"
+        return request
+
+    def parse_iso_date(self, date_str: str) -> str | None:
+        """
+        Normalizes dates to ISO 8601 string format.
+        """
+        if not date_str: return None
+        # Naive extraction - a real implementation would use dateutil.parser
+        try:
+            # Often dates come in as 'YYYY-MM-DD' or full datetimes
+            match = re.search(r'(\d{4}-\d{2}-\d{2})', date_str)
+            if match:
+                dt = datetime.strptime(match.group(1), '%Y-%m-%d')
+                return dt.isoformat()
+        except:
+            pass
+        return date_str # Return raw if unable to normalize
 
     async def parse(self, response: Response):
         """
         Main parser that distributes parsing based on URL.
         """
-        # Distribute logic based on domain
-        # We attempt direct parsing first if the response is valid (not a CAPTCHA/Cloudflare block page)
-        # Often Cloudflare returns ~30kb HTML payload. Let's assume if it's < 50kb and we find 0 events, it's blocked.
+        # Route requests based on domain structure directly without external API dependencies.
+        # Sites that frequently use "fast" session ID are inherently fast & reliable.
+        # Sites using "stealth" sid are utilizing the headless Chromium with NetworkIdle rendering.
+
+        # Route dynamically if this is a starting request!
+        if response.request.sid == "default":
+            # If the user submitted a base URL, route it efficiently based on known protections.
+            if any(domain in response.url for domain in ["berlin-buehnen.de", "rausgegangen.de", "eventbrite.de"]):
+                self.logger.info(f"Routing {response.url} through Stealth JS Session")
+                yield Request(response.url, callback=self.parse, sid="stealth")
+                return
+            else:
+                self.logger.info(f"Routing {response.url} through Fast HTTP Session")
+                yield Request(response.url, callback=self.parse, sid="fast")
+                return
+
         events_found = 0
-
-        # Add basic debugging to track the DOM payload
-        text_content = ""
-        try:
-            text_content = response.text if hasattr(response, 'text') else str(response.body)
-            print(f"[DEBUG - Direct] {response.url} returned HTML length: {len(text_content)} bytes")
-        except Exception:
-            print(f"[DEBUG - Direct] {response.url} failed to read text/body.")
-
         if "berlin-buehnen.de" in response.url:
             async for item in self.parse_berlin_buehnen(response):
                 events_found += 1
@@ -82,94 +139,13 @@ class BerlinEventsSpider(Spider):
                 events_found += 1
                 yield item
 
-        print(f"[DEBUG - Direct] Finished CSS parsing for {response.url} - Events found: {events_found}")
+        self.logger.info(f"[DEBUG - Scrapling] Finished CSS parsing for {response.url} (Session: {response.request.sid}) - Events found: {events_found}")
 
-        # If direct headless Chromium blocked (events_found = 0), route it through the External Gradio API Hub
+        # Final Fallback to Jina LLM if Scrapling Native fails to find items due to major layout shifts
         if events_found == 0:
-            print(f"[DEBUG - Fallback] Direct parsing failed for {response.url}. Activating Gradio API Hub fallback...")
-            async for item in self.parse_with_gradio_hub(response):
+            self.logger.warning(f"Zero events parsed organically on {response.url}. Attempting emergency Jina LLM extraction...")
+            async for item in self.parse_with_jina(response):
                 yield item
-
-    async def parse_with_gradio_hub(self, response: Response):
-        """
-        Uses the robust auxteam-scraper-hub Gradio API to reliably fetch content and sub-links bypassing direct blocks,
-        then defaults to Jina if structured data is entirely broken.
-        """
-        from gradio_client import Client
-        import asyncio
-        from scrapling.parser import Selector
-
-        client = Client("https://auxteam-scraper-hub.hf.space")
-
-        try:
-            print(f"[DEBUG - Gradio Hub] Fetching HTML for {response.url}...")
-
-            # Use asyncio to offload the synchronous Gradio predict method
-            loop = asyncio.get_running_loop()
-
-            # Since Gradio predict defaults to Markdown if selector is empty, we pass 'html' as selector to get full HTML
-            # to reuse our precise CSS parsers.
-            result = await loop.run_in_executor(None, lambda: client.predict(
-                url=response.url,
-                selector="html",
-                headless=True,
-                api_name="/stealthy_fetch_wrapper",
-            ))
-
-            if isinstance(result, dict) and result.get("status") == 200 and result.get("content"):
-                # Join the contents (in case multiple HTML tags returned)
-                html_text = "".join(result["content"])
-
-                if len(html_text) > 1000:
-                    print(f"[DEBUG - Gradio Hub] Success: Fetched {len(html_text)} bytes for {response.url}")
-                    tunneled_page = Selector(html_text)
-
-                    if "berlin-buehnen.de" in response.url:
-                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berlin-buehnen.de{path}"})()
-                        async for item in self.parse_berlin_buehnen(tunneled_resp):
-                            yield item
-                        return
-                    elif "rausgegangen.de" in response.url:
-                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://rausgegangen.de{path}"})()
-                        async for item in self.parse_rausgegangen(tunneled_resp):
-                            yield item
-                        return
-                    elif "berliner-ensemble.de" in response.url:
-                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.berliner-ensemble.de{path}"})()
-                        async for item in self.parse_berliner_ensemble(tunneled_resp):
-                            yield item
-                        return
-                    elif "oper-in-berlin.de" in response.url:
-                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.oper-in-berlin.de{path}"})()
-                        async for item in self.parse_oper_berlin(tunneled_resp):
-                            yield item
-                        return
-                    elif "improfabrik.de" in response.url:
-                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://improfabrik.de{path}"})()
-                        async for item in self.parse_improfabrik(tunneled_resp):
-                            yield item
-                        return
-                    elif "eventbrite.de" in response.url:
-                        tunneled_resp = type('TunneledResponse', (), {'css': tunneled_page.css, 'url': response.url, 'urljoin': lambda self, path: f"https://www.eventbrite.de{path}"})()
-                        async for item in self.parse_eventbrite(tunneled_resp):
-                            yield item
-                        return
-                else:
-                    print(f"[DEBUG - Gradio Hub] Failed: Payload was under 1000 bytes ({len(html_text)}).")
-                    print(f"[DEBUG - Gradio Hub RAW]: {result}")
-            else:
-                print(f"[DEBUG - Gradio Hub] Failed: Invalid status or missing content.")
-                print(f"[DEBUG - Gradio Hub RAW]: {result}")
-
-        except Exception as e:
-            import traceback
-            print(f"[DEBUG - Gradio Hub] API fetch failed for {response.url}: {e}")
-            traceback.print_exc()
-
-        # Fallback to Jina LLM Reader
-        print(f"[DEBUG - Fallback] Gradio parsing failed for {response.url}. Activating Jina LLM fallback...")
-        async for item in self.parse_with_jina(response):
-            yield item
 
     async def parse_with_jina(self, response: Response):
         """
@@ -249,16 +225,35 @@ class BerlinEventsSpider(Spider):
                 student_discount = True
 
             if event_name and link:
-                yield {
+                full_link = response.urljoin(link) if link.startswith('/') else link
+                event_data = {
                     "name": event_name.strip(),
                     "info": info.strip() if info else None,
                     "location": location.strip() if location else settings.default_location,
-                    "date": date_str.strip() if date_str else None,
+                    "date": self.parse_iso_date(date_str),
                     "time": time_str.strip() if time_str else None,
                     "ticket_prices": "Free" if 'free' in str(info).lower() else None,
                     "student_discounts_eligible": student_discount,
-                    "link": response.urljoin(link) if link.startswith('/') else link,
+                    "link": full_link,
                 }
+
+                # Internal Link Traversal Demonstration
+                # We yield a Request to dive into the ticket page to get actual prices if it's not marked free.
+                if event_data["ticket_prices"] is None and not settings.proxy_url:
+                    yield Request(full_link, callback=self.parse_ticket_page, meta={"event_data": event_data}, sid="fast")
+                else:
+                    yield event_data
+
+    async def parse_ticket_page(self, response: Response):
+        """
+        Secondary parser to extract specific ticket prices from an event's detail page.
+        """
+        event_data = response.request.meta["event_data"]
+        # Dummy ticket extraction from hypothetical sub-page
+        price_node = response.css('.price-tag::text').get()
+        if price_node:
+            event_data["ticket_prices"] = price_node.strip()
+        yield event_data
 
     async def parse_improfabrik(self, response: Response):
         """
