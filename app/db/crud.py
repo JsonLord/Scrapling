@@ -25,9 +25,11 @@ async def persist_events(events: List[Dict[str, Any]]):
                 parsed_date = datetime.datetime.now()
             elif isinstance(date_val, str):
                 try:
-                    # Very naive parsing
-                    parsed_date = datetime.datetime.strptime(date_val, "%Y-%m-%d")
-                except ValueError:
+                    # Handle ISO format strings (with or without time component)
+                    from dateutil.parser import parse
+                    parsed_date = parse(date_val)
+                except Exception:
+                    # Fallback to current date
                     parsed_date = datetime.datetime.now()
             else:
                 parsed_date = date_val

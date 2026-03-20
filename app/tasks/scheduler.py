@@ -67,18 +67,48 @@ async def weekly_weekend_crawl():
     """
     Task to be executed every Thursday morning.
     Performs a supplementary crawl targeting weekend events.
+    Filters the scraped items to ONLY include events happening between this Thursday and Sunday.
     """
     print("Starting weekend supplementary crawl...")
     loop = asyncio.get_running_loop()
+    from datetime import datetime, timedelta
+    import logging
     try:
         from app.db.crud import persist_events
 
         urls = await _get_active_urls()
         items = await loop.run_in_executor(None, run_scraper, urls)
-        if items:
-            await persist_events(list(items))
 
-        print(f"Weekend supplementary crawl completed successfully. Target URLs: {urls or 'defaults'}")
+        if items:
+            # Filter logic: only keep events within the upcoming weekend (Thursday -> Sunday)
+            today = datetime.now()
+            # If today is Thursday (weekday() == 3), Sunday is +3 days
+            # If this runs on a different day for testing, calculate the next Sunday relative to today
+            days_to_sunday = 6 - today.weekday()
+            end_of_weekend = today + timedelta(days=days_to_sunday)
+
+            # Normalize to start and end of day
+            start_date = today.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = end_of_weekend.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+            weekend_items = []
+            for item in items:
+                event_date_str = item.get("date")
+                if not event_date_str:
+                    continue # Skip events without a valid date for weekend filter
+
+                try:
+                    # The spider normalizes dates to ISO 8601 strings (e.g. 2026-04-12T00:00:00)
+                    event_date = datetime.fromisoformat(event_date_str)
+                    if start_date <= event_date <= end_date:
+                        weekend_items.append(item)
+                except Exception as e:
+                    # Ignore unparseable dates during strict weekend filter
+                    pass
+
+            await persist_events(weekend_items)
+            print(f"Weekend supplementary crawl completed. Retained {len(weekend_items)} out of {len(items)} total scraped events.")
+
     except Exception as e:
         print(f"Error in weekend crawl: {e}")
 
