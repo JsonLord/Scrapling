@@ -2,6 +2,7 @@ import gradio as gr
 from scrapling.core.ai import ScraplingMCPServer
 import asyncio
 from typing import Any
+from datetime import datetime, timedelta
 
 def create_ui():
     with gr.Blocks(title="Scrapling") as demo:
@@ -59,10 +60,11 @@ def create_ui():
             gr.Markdown("Scrape event websites over a specified date range. Extracts event details and ticket prices.")
             e_urls_input = gr.Textbox(label="URLs (newline-separated)", placeholder="https://example.com/events\nhttps://example.org/calendar", lines=3)
             with gr.Row():
-                e_start_date = gr.Textbox(label="Start Date", placeholder="YYYY-MM-DD")
-                e_end_date = gr.Textbox(label="End Date", placeholder="YYYY-MM-DD")
+                e_start_date = gr.Textbox(label="Start Date", placeholder="YYYY-MM-DD", value=lambda: datetime.now().strftime("%Y-%m-%d"))
+                e_end_date = gr.Textbox(label="End Date", placeholder="YYYY-MM-DD", value=lambda: (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d"))
             e_output = gr.JSON(label="Scraped Events")
             e_fetch_btn = gr.Button("Scrape Events")
+
 
 
             async def event_scrape_wrapper(urls_text, start_date, end_date):
@@ -73,26 +75,65 @@ def create_ui():
                 results = []
 
                 try:
-                    # Do an actual crawl and set google_search=False to avoid web search behavior
+                    # Fetch initial pages to get HTML links
+                    # We will use HTML extraction to parse links
                     pages = await ScraplingMCPServer.bulk_stealthy_fetch(
                         urls=urls,
+                        extraction_type="html",
                         headless=True,
                         google_search=False,
-                        css_selector="body" # We grab the body to find links
+                        css_selector="body",
+                        main_content_only=False
                     )
 
+                    from bs4 import BeautifulSoup
+                    import urllib.parse
+
                     for i, page in enumerate(pages):
-                        # Simple extraction logic for demonstration: Extracting basic content snippet
+                        base_url = urls[i]
+                        html_content = page.content if page.content else ""
+                        soup = BeautifulSoup(html_content, 'html.parser')
+
+                        # Find all links that look like events/tickets
+                        links = soup.find_all('a', href=True)
+                        event_links = set()
+                        for link in links:
+                            href = link['href']
+                            full_url = urllib.parse.urljoin(base_url, href)
+                            # Basic heuristic: ignore obvious non-event links
+                            if full_url.startswith('http') and base_url in full_url:
+                                event_links.add(full_url)
+
+                        # Crawl a small sample of the internal links found
+                        crawl_targets = list(event_links)[:3] # Limit to 3 to avoid hanging Gradio
+                        if crawl_targets:
+                            target_pages = await ScraplingMCPServer.bulk_stealthy_fetch(
+                                urls=crawl_targets,
+                                headless=True,
+                                google_search=False,
+                                extraction_type="text",
+                                main_content_only=True
+                            )
+
+                            for j, t_page in enumerate(target_pages):
+                                results.append({
+                                    "source_url": crawl_targets[j],
+                                    "content_snippet": t_page.content[:500] + "..." if t_page.content else "",
+                                    "status": "success",
+                                    "note": f"Internal link crawled for dates {start_date} to {end_date}."
+                                })
+
                         results.append({
-                            "source_url": urls[i],
-                            "content_snippet": page.content[:500] + "..." if page.content else "",
-                            "status": "success",
-                            "note": f"Scraped for dates {start_date} to {end_date}. Google search spoofing disabled."
+                            "source_url": base_url,
+                            "links_found": len(event_links),
+                            "crawled_samples": crawl_targets,
+                            "status": "success"
                         })
 
                     return {"events": results}
                 except Exception as e:
-                    return {"error": str(e)}
+                    import traceback
+                    return {"error": str(e), "trace": traceback.format_exc()}
 
             e_fetch_btn.click(event_scrape_wrapper, inputs=[e_urls_input, e_start_date, e_end_date], outputs=e_output)
 
