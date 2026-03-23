@@ -91,8 +91,12 @@ def create_ui():
 
                     for i, page in enumerate(pages):
                         base_url = urls[i]
+
                         html_content = page.content if page.content else ""
+                        if isinstance(html_content, list):
+                            html_content = " ".join(str(item) for item in html_content)
                         soup = BeautifulSoup(html_content, 'html.parser')
+
 
                         # Find all links that look like events/tickets
                         links = soup.find_all('a', href=True)
@@ -116,12 +120,18 @@ def create_ui():
                             )
 
                             for j, t_page in enumerate(target_pages):
-                                results.append({
-                                    "source_url": crawl_targets[j],
-                                    "content_snippet": t_page.content[:500] + "..." if t_page.content else "",
-                                    "status": "success",
-                                    "note": f"Internal link crawled for dates {start_date} to {end_date}."
-                                })
+
+                                    snippet = t_page.content if t_page.content else ""
+                                    if isinstance(snippet, list):
+                                        snippet = " ".join(str(item) for item in snippet)
+
+                                    results.append({
+                                        "source_url": crawl_targets[j],
+                                        "content_snippet": snippet[:500] + "...",
+                                        "status": "success",
+                                        "note": f"Internal link crawled for dates {start_date} to {end_date}."
+                                    })
+
 
                         results.append({
                             "source_url": base_url,
