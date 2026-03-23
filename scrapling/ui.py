@@ -64,6 +64,7 @@ def create_ui():
             e_output = gr.JSON(label="Scraped Events")
             e_fetch_btn = gr.Button("Scrape Events")
 
+
             async def event_scrape_wrapper(urls_text, start_date, end_date):
                 if not urls_text:
                     return {"error": "URLs are required"}
@@ -72,22 +73,21 @@ def create_ui():
                 results = []
 
                 try:
-                    # Very basic generalized event extraction using Scrapling's stealthy fetcher and markdown/html parsing.
-                    # In a real-world scenario, you would have specific CSS selectors or LLM parsing here.
-                    # For this UI, we'll demonstrate using bulk_stealthy_fetch and extracting links.
+                    # Do an actual crawl and set google_search=False to avoid web search behavior
                     pages = await ScraplingMCPServer.bulk_stealthy_fetch(
                         urls=urls,
                         headless=True,
+                        google_search=False,
                         css_selector="body" # We grab the body to find links
                     )
 
                     for i, page in enumerate(pages):
-                        # A mock event extraction logic just to show structure and data extraction based on Scrapling capabilities
+                        # Simple extraction logic for demonstration: Extracting basic content snippet
                         results.append({
                             "source_url": urls[i],
                             "content_snippet": page.content[:500] + "..." if page.content else "",
                             "status": "success",
-                            "note": f"Scraped for dates {start_date} to {end_date}."
+                            "note": f"Scraped for dates {start_date} to {end_date}. Google search spoofing disabled."
                         })
 
                     return {"events": results}
