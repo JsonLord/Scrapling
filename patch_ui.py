@@ -1,78 +1,14 @@
-import gradio as gr
-from scrapling.core.ai import ScraplingMCPServer
-import asyncio
-from typing import Any
-from datetime import datetime, timedelta
+import re
 
-def create_ui():
-    with gr.Blocks(title="Scrapling") as demo:
-        gr.Markdown("# Scrapling Web Interface")
+with open("scrapling/ui.py", "r") as f:
+    content = f.read()
 
-        with gr.Tab("Fetch (HTTP)"):
-            gr.Markdown("Standard HTTP Fetcher. Fast but less stealthy.")
-            url_input = gr.Textbox(label="URL", placeholder="https://example.com")
-            selector_input = gr.Textbox(label="CSS Selector (Optional)", placeholder=".content")
-            output = gr.JSON(label="Result")
-            fetch_btn = gr.Button("Fetch")
-
-            async def fetch_wrapper(url, selector):
-                if not url:
-                    return {"error": "URL is required"}
-                try:
-                    # ScraplingMCPServer.get is synchronous or async?
-                    # In code: staticmethod def get(...) -> ResponseModel:
-                    # It calls Fetcher.get which is synchronous.
-                    # Gradio handles async/sync. But running sync function in async context might block.
-                    # Since it is blocking, we should probably run it in executor or just let Gradio handle it.
-                    # But ScraplingMCPServer.get uses 'impersonate' which uses curl_cffi.
-                    result = ScraplingMCPServer.get(url, css_selector=selector if selector else None)
-                    return result.model_dump()
-                except Exception as e:
-                    return {"error": str(e)}
-
-            fetch_btn.click(fetch_wrapper, inputs=[url_input, selector_input], outputs=output)
-
-        with gr.Tab("Stealthy Fetch (Browser)"):
-            gr.Markdown("Stealthy Browser Fetcher (Playwright). Slower but bypasses bot protection.")
-            s_url_input = gr.Textbox(label="URL")
-            s_selector_input = gr.Textbox(label="CSS Selector (Optional)")
-            s_headless = gr.Checkbox(label="Headless", value=True)
-            s_output = gr.JSON(label="Result")
-            s_fetch_btn = gr.Button("Stealthy Fetch")
-
-            async def stealthy_fetch_wrapper(url, selector, headless):
-                if not url:
-                    return {"error": "URL is required"}
-                try:
-                    result = await ScraplingMCPServer.stealthy_fetch(
-                        url,
-                        css_selector=selector if selector else None,
-                        headless=headless
-                    )
-                    return result.model_dump()
-                except Exception as e:
-                    return {"error": str(e)}
-
-            s_fetch_btn.click(stealthy_fetch_wrapper, inputs=[s_url_input, s_selector_input, s_headless], outputs=s_output)
-
-
-        with gr.Tab("Event Scraping"):
-            gr.Markdown("Scrape event websites over a specified date range. Extracts event details and ticket prices.")
-            e_urls_input = gr.Textbox(label="URLs (newline-separated)", placeholder="https://example.com/events\nhttps://example.org/calendar", lines=3)
-            with gr.Row():
-                e_start_date = gr.Textbox(label="Start Date", placeholder="YYYY-MM-DD", value=lambda: datetime.now().strftime("%Y-%m-%d"))
-                e_end_date = gr.Textbox(label="End Date", placeholder="YYYY-MM-DD", value=lambda: (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d"))
-            e_output = gr.JSON(label="Scraped Events")
-            e_fetch_btn = gr.Button("Scrape Events")
-
-
-
-
+new_wrapper = """
             async def event_scrape_wrapper(urls_text, start_date, end_date):
                 if not urls_text:
                     return {"error": "URLs are required"}
 
-                urls = [u.strip() for u in urls_text.split('\n') if u.strip()]
+                urls = [u.strip() for u in urls_text.split('\\n') if u.strip()]
                 results = []
 
                 try:
@@ -158,7 +94,9 @@ def create_ui():
                 except Exception as e:
                     import traceback
                     return {"error": str(e), "trace": traceback.format_exc()}
+"""
 
-            e_fetch_btn.click(event_scrape_wrapper, inputs=[e_urls_input, e_start_date, e_end_date], outputs=e_output)
+content = re.sub(r"async def event_scrape_wrapper\(.*?\)(.*?)(?=e_fetch_btn\.click)", new_wrapper + "\n            ", content, flags=re.DOTALL)
 
-    return demo
+with open("scrapling/ui.py", "w") as f:
+    f.write(content)
