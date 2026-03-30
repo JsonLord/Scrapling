@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Scraper Dashboard</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js for lightweight reactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-50 font-sans antialiased text-gray-800" x-data="eventApp()">
+
+    <!-- Navbar -->
+    <nav class="bg-white shadow">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex">
+                    <div class="flex-shrink-0 flex items-center">
+                        <h1 class="text-xl font-bold text-indigo-600">Event Scraper</h1>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button @click="triggerCrawl()" :disabled="crawling" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400">
+                        <span x-show="!crawling">Trigger Manual Crawl</span>
+                        <span x-show="crawling">Crawling...</span>
+                    </button>
+                    <button @click="showSettings = true" class="text-gray-500 hover:text-gray-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+
+        <!-- Filters -->
+        <div class="bg-white p-4 rounded-lg shadow mb-6 flex flex-wrap gap-4 items-end">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Location</label>
+                <input type="text" x-model="filters.location" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" placeholder="e.g. Berlin">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Start Date</label>
+                <input type="date" x-model="filters.start_date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">End Date</label>
+                <input type="date" x-model="filters.end_date" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+            </div>
+            <div class="flex items-center h-full mb-2">
+                <input id="student_discount" type="checkbox" x-model="filters.has_student_discount" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                <label for="student_discount" class="ml-2 block text-sm text-gray-900">Student Discount Only</label>
+            </div>
+            <div>
+                <button @click="fetchEvents()" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200">
+                    Apply Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Events Table -->
+        <div class="bg-white shadow overflow-hidden sm:rounded-lg">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student Disc.</th>
+                        <th scope="col" class="relative px-6 py-3"><span class="sr-only">Link</span></th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-for="event in events" :key="event.id">
+                        <tr>
+                            <td class="px-6 py-4">
+                                <div class="text-sm font-medium text-gray-900" x-text="event.name"></div>
+                                <div class="text-sm text-gray-500 truncate w-64" x-text="event.info" :title="event.info"></div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="event.location"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                <div x-text="formatDate(event.date)"></div>
+                                <div x-text="event.time || '-'"></div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="event.ticket_prices || 'Unknown'"></td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span x-show="event.student_discounts_eligible" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Yes</span>
+                                <span x-show="!event.student_discounts_eligible" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">No</span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <a :href="event.link" target="_blank" class="text-indigo-600 hover:text-indigo-900">View →</a>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="events.length === 0">
+                        <td colspan="6" class="px-6 py-10 text-center text-gray-500">No events found matching your criteria. Try triggering a crawl!</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div x-show="showSettings" class="fixed z-10 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true" style="display: none;">
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="showSettings = false"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">Application Settings</h3>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-gray-700">Default Location</label>
+                        <input type="text" x-model="settings.default_location" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+                    </div>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Target URLs</label>
+                        <template x-for="(url, index) in settings.target_urls" :key="index">
+                            <div class="flex mb-2">
+                                <input type="text" x-model="settings.target_urls[index]" class="block w-full rounded-l-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2">
+                                <button @click="settings.target_urls.splice(index, 1)" class="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-gray-500 hover:bg-red-50 hover:text-red-500">X</button>
+                            </div>
+                        </template>
+                        <button @click="settings.target_urls.push('')" class="mt-2 text-sm text-indigo-600 hover:text-indigo-800">+ Add URL</button>
+                    </div>
+                </div>
+                <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                    <button @click="saveSettings()" type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm">Save</button>
+                    <button @click="showSettings = false; fetchSettings()" type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('eventApp', () => ({
+                events: [],
+                settings: { default_location: '', target_urls: [] },
+                showSettings: false,
+                crawling: false,
+                filters: {
+                    location: '',
+                    start_date: '',
+                    end_date: '',
+                    has_student_discount: false
+                },
+
+                init() {
+                    this.fetchSettings().then(() => {
+                        this.filters.location = this.settings.default_location;
+                        this.fetchEvents();
+                    });
+                },
+
+                async fetchEvents() {
+                    let url = new URL('/api/v1/events', window.location.origin);
+                    if (this.filters.location) url.searchParams.append('location', this.filters.location);
+                    if (this.filters.start_date) url.searchParams.append('start_date', this.filters.start_date);
+                    if (this.filters.end_date) url.searchParams.append('end_date', this.filters.end_date);
+                    if (this.filters.has_student_discount) url.searchParams.append('has_student_discount', true);
+
+                    const res = await fetch(url);
+                    this.events = await res.json();
+                },
+
+                async fetchSettings() {
+                    const res = await fetch('/api/v1/settings');
+                    this.settings = await res.json();
+                },
+
+                async saveSettings() {
+                    // Filter out empty URLs
+                    this.settings.target_urls = this.settings.target_urls.filter(url => url.trim() !== '');
+
+                    await fetch('/api/v1/settings', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.settings)
+                    });
+                    this.showSettings = false;
+                    this.fetchEvents(); // Refetch just in case location changed significantly
+                },
+
+                async triggerCrawl() {
+                    this.crawling = true;
+                    try {
+                        await fetch('/api/v1/jobs/crawl', { method: 'POST' });
+                        // Polling to simulate a long crawl completion
+                        setTimeout(() => {
+                            this.crawling = false;
+                            this.fetchEvents();
+                        }, 5000);
+                    } catch (e) {
+                        this.crawling = false;
+                        alert("Failed to start crawl.");
+                    }
+                },
+
+                formatDate(dateString) {
+                    if (!dateString) return '-';
+                    const date = new Date(dateString);
+                    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                }
+            }))
+        })
+    </script>
+</body>
+</html>
